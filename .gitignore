@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# cocotb / simulation
+sim_build/
+results.xml
+*.vcd
+*.fst
+*.ghw
+*.wlf
+*.log
+*.jou
+*.pb
+transcript
+
+# Verilator / Icarus / Questa temporary files
+obj_dir/
+*.vvp
+work/
+csrc/
+
+# Cadence / Synopsys generated files
+*.rpt
+*.db
+*.ddc
+*.sdf
+*.spef
+*.saif
+*.fsdb
+INCA_libs/
+xcelium.d/
+genus.log*
+innovus.log*
+
+# OS / editor
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
