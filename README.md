@@ -1,11 +1,30 @@
-# project2-flashattention-ip
 # Project2 FlashAttention Hardware Accelerator IP
 
-本项目为课程 Project2 的 FlashAttention-style 硬件加速器 IP 设计。
+本项目为课程 Project2 的 **FlashAttention-style 硬件加速器 IP** 设计。
 
-目标是使用 Verilog/SystemVerilog 实现一个可验证、可综合、可扩展的 FlashAttention 加速器。Baseline 固定为单 batch、单 head，`S=256`，`d=64`，输入输出数据格式为 Q8.8 定点数。
+项目目标是使用 **Verilog/SystemVerilog** 实现一个可验证、可综合、可扩展的 FlashAttention 加速器。Baseline 固定为单 batch、单 head，`S = 256`，`d = 64`，输入输出数据格式为 **Q8.8 定点数**。
 
-项目重点包括：
+---
+
+## Table of Contents
+
+- [1. Project Overview](#1-project-overview)
+- [2. Baseline Configuration](#2-baseline-configuration)
+- [3. Directory Structure and File Responsibilities](#3-directory-structure-and-file-responsibilities)
+- [4. Interface Specification](#4-interface-specification)
+- [5. Memory Layout](#5-memory-layout)
+- [6. Data Format Convention](#6-data-format-convention)
+- [7. Team Division](#7-team-division)
+- [8. Collaboration Workflow](#8-collaboration-workflow)
+- [9. Interface Change Rule](#9-interface-change-rule)
+- [10. Minimum Integration Contract](#10-minimum-integration-contract)
+- [11. Final Submission Checklist](#11-final-submission-checklist)
+
+---
+
+## 1. Project Overview
+
+本项目重点包括：
 
 - FlashAttention-style attention 计算
 - online softmax
@@ -17,9 +36,11 @@
 - FP32 golden model 对比
 - 综合脚本与设计报告
 
+整体目标不是一开始追求最高性能，而是先完成一个 **正确、可验证、可提交、可扩展** 的 baseline 版本。
+
 ---
 
-## 1. Project Baseline
+## 2. Baseline Configuration
 
 当前 baseline 配置如下：
 
@@ -34,8 +55,30 @@ Q/K/V/O = Q8.8 signed fixed-point
 Dot-product accumulator = 40-bit 或 48-bit
 支持 causal mask
 禁止存储完整 attention score/probability matrix
+```
 
-## 2. Directory Structure and File Responsibilities
+核心计算流程：
+
+```text
+for each query row i:
+    load Q_i
+
+    initialize m, l, acc[0:63]
+
+    for each K/V tile:
+        load K_tile and V_tile
+        compute score_tile = Q_i dot K_tile
+        apply scale and causal mask
+        update online softmax state
+        update value accumulator
+
+    normalize acc / l
+    write O_i back to memory
+```
+
+---
+
+## 3. Directory Structure and File Responsibilities
 
 本项目采用模块化目录结构，按照 **文档、RTL、算法模型、测试平台、仿真脚本、综合脚本、辅助脚本** 进行划分。
 
@@ -51,7 +94,7 @@ Dot-product accumulator = 40-bit 或 48-bit
 
 ---
 
-### 2.1 Full Project Tree
+### 3.1 Full Project Tree
 
 ```text
 project2-flashattention-ip/
@@ -211,15 +254,17 @@ project2-flashattention-ip/
 
 ---
 
-## 3. Interface Specification
+## 4. Interface Specification
 
-本节定义项目中各模块之间的接口约定。所有成员在开发前必须先对齐接口，避免后期集成时互相改端口。
+本节定义项目中各模块之间的接口约定。
+
+所有成员在开发前必须先对齐接口，避免后期集成时互相改端口。
 
 ---
 
-### 3.1 Global Parameters
+### 4.1 Global Parameters
 
-全局参数建议统一放在：
+全局参数统一放在：
 
 ```text
 rtl/include/flash_attn_pkg.sv
@@ -251,7 +296,7 @@ endpackage
 
 ---
 
-### 3.2 Top Module Interface
+### 4.2 Top Module Interface
 
 文件：
 
@@ -259,11 +304,18 @@ endpackage
 rtl/top/flash_attn_top.sv
 ```
 
-作用：
-
 `flash_attn_top` 是整个 IP 的顶层模块，向外暴露 AXI4-Lite 控制接口和 AXI Master 数据接口，内部连接寄存器、DMA 和计算核心。
 
-建议顶层端口如下：
+顶层接口建议包括：
+
+- `clk`
+- `rst_n`
+- AXI4-Lite slave control interface
+- AXI4 master read interface
+- AXI4 master write interface
+- `irq`
+
+建议接口草稿：
 
 ```systemverilog
 module flash_attn_top #(
@@ -320,16 +372,16 @@ module flash_attn_top #(
     input  logic              m_axi_awready,
 
     // AXI4 master write data channel
-    output logic [AXI_DATA_W-1:0] m_axi_wdata,
+    output logic [AXI_DATA_W-1:0]   m_axi_wdata,
     output logic [AXI_DATA_W/8-1:0] m_axi_wstrb,
-    output logic              m_axi_wlast,
-    output logic              m_axi_wvalid,
-    input  logic              m_axi_wready,
+    output logic                    m_axi_wlast,
+    output logic                    m_axi_wvalid,
+    input  logic                    m_axi_wready,
 
     // AXI4 master write response channel
-    input  logic [1:0]        m_axi_bresp,
-    input  logic              m_axi_bvalid,
-    output logic              m_axi_bready,
+    input  logic [1:0] m_axi_bresp,
+    input  logic       m_axi_bvalid,
+    output logic       m_axi_bready,
 
     output logic irq
 );
@@ -337,7 +389,7 @@ module flash_attn_top #(
 
 ---
 
-### 3.3 AXI4-Lite Register Map
+### 4.3 AXI4-Lite Register Map
 
 文件：
 
@@ -365,7 +417,7 @@ AXI4-Lite 寄存器用于主机配置加速器、启动任务和读取状态。
 | `0x3C` | `SCALE` | R/W | attention scale，近似 `1 / sqrt(D_MODEL)` |
 | `0x40` | `CYCLES` | R | 本次任务运行周期数 |
 
-#### CTRL 行为
+#### CTRL Register
 
 | bit | 名称 | 行为 |
 |---:|---|---|
@@ -373,7 +425,7 @@ AXI4-Lite 寄存器用于主机配置加速器、启动任务和读取状态。
 | 1 | `SOFT_RESET` | 软件复位内部状态机和状态寄存器 |
 | 2 | `IRQ_EN` | 任务完成后允许产生中断 |
 
-#### STATUS 行为
+#### STATUS Register
 
 | bit | 名称 | 行为 |
 |---:|---|---|
@@ -383,7 +435,7 @@ AXI4-Lite 寄存器用于主机配置加速器、启动任务和读取状态。
 
 ---
 
-### 3.4 Register Module Internal Interface
+### 4.4 Register Module Internal Interface
 
 `axi_lite_regs.sv` 对内输出配置寄存器，对外连接 AXI4-Lite。
 
@@ -414,11 +466,11 @@ input  logic [31:0] cycles
 
 1. `start_pulse` 只保持一个 clock cycle。
 2. `busy`、`done`、`error` 由 top 或 DMA/core 状态机产生。
-3. `cycles` 在 `start_pulse` 后清零，在 `busy=1` 时递增。
+3. `cycles` 在 `start_pulse` 后清零，在 `busy = 1` 时递增。
 
 ---
 
-### 3.5 Flash Core Interface
+### 4.5 Flash Core Interface
 
 文件：
 
@@ -478,7 +530,7 @@ module flash_core #(
 );
 ```
 
-#### Core handshake 约定
+#### Core Handshake Convention
 
 | 信号 | 方向 | 说明 |
 |---|---|---|
@@ -498,7 +550,7 @@ module flash_core #(
 
 ---
 
-### 3.6 DMA Controller Interface
+### 4.6 DMA Controller Interface
 
 文件：
 
@@ -508,7 +560,7 @@ rtl/axi/dma_controller.sv
 
 DMA 负责把 core 的行/tile 请求转换成 AXI 读写请求。
 
-建议接口：
+建议接口如下：
 
 ```systemverilog
 module dma_controller #(
@@ -580,7 +632,7 @@ module dma_controller #(
 
 ---
 
-### 3.7 Memory Layout
+## 5. Memory Layout
 
 外部 memory 中的数据按 row-major 排列。
 
@@ -616,9 +668,9 @@ V_tile start address = V_BASE + kv_start * STRIDE_BYTES
 
 ---
 
-### 3.8 Core Internal Data Convention
+## 6. Data Format Convention
 
-#### Q/K/V/O 数据格式
+### 6.1 Q/K/V/O Format
 
 ```text
 Q/K/V input: signed Q8.8, 16-bit
@@ -631,7 +683,9 @@ Q8.8 表示：
 real_value = int16_value / 256.0
 ```
 
-#### Dot Product
+---
+
+### 6.2 Dot Product
 
 ```text
 score_j = sum over d: Q_i[d] * K_j[d]
@@ -649,7 +703,9 @@ DOT_W = 48
 2. 64 项累加需要更高位宽。
 3. 48-bit 比 32-bit 更安全。
 
-#### Scale
+---
+
+### 6.3 Scale
 
 attention scale：
 
@@ -665,7 +721,9 @@ scale = 1 / 8 = 0.125
 
 硬件中可以用定点常数近似。
 
-#### Causal Mask
+---
+
+### 6.4 Causal Mask
 
 当 causal enable 时：
 
@@ -674,7 +732,7 @@ if key_index > query_index:
     score = NEG_LARGE
 ```
 
-例如：
+示例：
 
 ```text
 i = 0 时，只允许 j = 0
@@ -684,7 +742,7 @@ i = 255 时，允许 j = 0 ... 255
 
 ---
 
-### 3.9 Module Ownership
+## 7. Team Division
 
 | 模块 / 文件 | 负责人 | 说明 |
 |---|---|---|
@@ -701,7 +759,48 @@ i = 255 时，允许 j = 0 ... 255
 
 ---
 
-### 3.10 Interface Change Rule
+## 8. Collaboration Workflow
+
+推荐分支结构：
+
+```text
+main                 稳定可提交版本
+dev                  日常集成版本
+feature/model        算法模型开发
+feature/core-rtl     计算核心 RTL 开发
+feature/axi-dma      AXI / DMA / top 开发
+feature/tb           testbench 开发
+docs/report          文档和报告开发
+```
+
+开发流程：
+
+```text
+1. 从 dev 拉取最新代码
+2. 在自己的 feature 分支开发
+3. 完成一个小功能后 commit
+4. push 到 GitHub
+5. 创建 Pull Request 到 dev
+6. 至少一名队友 review 后 merge
+7. dev 测试稳定后再合并到 main
+```
+
+常用命令：
+
+```bash
+git checkout dev
+git pull
+
+git checkout -b feature/xxx
+
+git add .
+git commit -m "feat: describe your change"
+git push -u origin feature/xxx
+```
+
+---
+
+## 9. Interface Change Rule
 
 为了避免集成混乱，所有接口变更必须遵守以下规则：
 
@@ -719,11 +818,13 @@ i = 255 时，允许 j = 0 ... 255
 
 ---
 
-### 3.11 Minimum Integration Contract
+## 10. Minimum Integration Contract
 
-为了让三个人可以并行开发，先约定最小集成边界：
+为了让三个人可以并行开发，先约定最小集成边界。
 
-#### Member A 向 RTL 提供
+---
+
+### 10.1 Member A 向 RTL 提供
 
 ```text
 tb/vectors/input_q.hex
@@ -732,7 +833,7 @@ tb/vectors/input_v.hex
 tb/vectors/golden_o.hex
 ```
 
-以及：
+同时提供：
 
 ```text
 Q/K/V 数据格式说明
@@ -741,7 +842,9 @@ golden 输出说明
 fixed-point 中间参考数据
 ```
 
-#### Member B 向集成提供
+---
+
+### 10.2 Member B 向集成提供
 
 ```text
 flash_core.sv
@@ -758,7 +861,9 @@ flash_core.sv
 6. 不直接访问 AXI
 ```
 
-#### Member C 向 core 提供
+---
+
+### 10.3 Member C 向 Core 提供
 
 ```text
 1. Q row 数据
@@ -774,4 +879,26 @@ flash_core.sv
 2. DMA 可从 memory 读取 Q/K/V
 3. DMA 可将 O 写回 memory
 4. top-level testbench 能完成端到端验证
+```
+
+---
+
+## 11. Final Submission Checklist
+
+最终提交前检查：
+
+```text
+[ ] RTL 源码完整
+[ ] Testbench 可运行
+[ ] Python golden model 可运行
+[ ] 随机测试通过
+[ ] causal mask 测试通过
+[ ] AXI4-Lite 测试通过
+[ ] START / BUSY / DONE 流程通过
+[ ] 误差统计满足要求
+[ ] 综合脚本和 SDC 文件完整
+[ ] 设计文档完整
+[ ] 测评报告完整
+[ ] README 说明清楚
+[ ] baseline 版本已冻结
 ```
