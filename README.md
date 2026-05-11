@@ -746,11 +746,11 @@ i = 255 时，允许 j = 0 ... 255
 
 | 模块 / 文件 | 负责人 | 说明 |
 |---|---|---|
-| `model/*` | Member A | 算法模型、定点模型、测试向量、误差检查 |
+| `model/*` | Member C | 算法模型、定点模型、测试向量、误差检查 |
 | `rtl/core/*` | Member B | FlashAttention 计算核心 |
 | `rtl/mem/*` | Member B | tile buffer、row buffer |
-| `rtl/axi/*` | Member C | AXI4-Lite、AXI Master、DMA |
-| `rtl/top/*` | Member C | 顶层集成 |
+| `rtl/axi/*` | Member A | AXI4-Lite、AXI Master、DMA |
+| `rtl/top/*` | Member A | 顶层集成 |
 | `tb/*` | Member C，A 协助 | testbench、memory model、端到端测试 |
 | `docs/architecture.md` | 全员 | 每个人补自己负责的架构说明 |
 | `docs/interface_spec.md` | Member C 主维护 | 所有接口修改必须同步更新 |
