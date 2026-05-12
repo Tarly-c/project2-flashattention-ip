@@ -41,6 +41,7 @@ module tb_flash_core_smoke;
     int d;
     int b;
     int output_rows;
+    logic signed [DATA_W-1:0] expected_first_word [0:S_LEN-1];
 
     flash_core #(
         .S_LEN(S_LEN),
@@ -101,7 +102,7 @@ module tb_flash_core_smoke;
             if (q_req_valid && q_req_ready) begin
                 $display("Q request row=%0d", q_req_row);
                 for (d = 0; d < D_MODEL; d = d + 1) begin
-                    q_data[d] <= $signed({1'b0, q_req_row}) + d + 1;
+                    q_data[d] <= ($signed({1'b0, q_req_row}) + d + 1) <<< 4;
                 end
                 q_data_valid <= 1'b1;
             end
@@ -114,8 +115,8 @@ module tb_flash_core_smoke;
                 $display("KV request start=%0d len=%0d", kv_req_start, kv_req_len);
                 for (b = 0; b < BK; b = b + 1) begin
                     for (d = 0; d < D_MODEL; d = d + 1) begin
-                        k_tile[b][d] <= $signed({1'b0, kv_req_start}) + b + d + 1;
-                        v_tile[b][d] <= $signed({1'b0, kv_req_start}) + b + d + 2;
+                        k_tile[b][d] <= ($signed({1'b0, kv_req_start}) + b + d + 1) <<< 4;
+                        v_tile[b][d] <= ($signed({1'b0, kv_req_start}) + b + d + 2) <<< 4;
                     end
                 end
                 kv_data_valid <= 1'b1;
@@ -126,12 +127,26 @@ module tb_flash_core_smoke;
             end
 
             if (o_valid && o_ready) begin
-                if ($isunknown(o_data[0])) begin
-                    $display("FAIL O row %0d first word is unknown", o_row);
+                if (o_row !== output_rows[$clog2(S_LEN)-1:0]) begin
+                    $display("FAIL output row order got=%0d expected=%0d", o_row, output_rows);
                     $fatal(1);
                 end
+                if (o_data[0] !== expected_first_word[output_rows]) begin
+                    $display("FAIL O[%0d][0] got=%0d hex=%04h expected=%0d hex=%04h",
+                             o_row, o_data[0], o_data[0],
+                             expected_first_word[output_rows], expected_first_word[output_rows]);
+                    $fatal(1);
+                end
+                for (d = 1; d < D_MODEL; d = d + 1) begin
+                    if (o_data[d] !== '0) begin
+                        $display("FAIL O[%0d][%0d] got_hex=%04h expected_hex=0000",
+                                 o_row, d, o_data[d]);
+                        $fatal(1);
+                    end
+                end
                 output_rows <= output_rows + 1;
-                $display("O row %0d first_word=%0d", o_row, o_data[0]);
+                $display("PASS O row %0d bit-exact first_word=%0d hex=%04h",
+                         o_row, o_data[0], o_data[0]);
             end
         end
     end
@@ -139,6 +154,11 @@ module tb_flash_core_smoke;
     initial begin
         $dumpfile("tb_flash_core_smoke.vcd");
         $dumpvars(0, tb_flash_core_smoke);
+
+        expected_first_word[0] = 16'sd50;
+        expected_first_word[1] = 16'sd68;
+        expected_first_word[2] = 16'sd86;
+        expected_first_word[3] = 16'sd104;
 
         clk          = 1'b0;
         rst_n        = 1'b0;

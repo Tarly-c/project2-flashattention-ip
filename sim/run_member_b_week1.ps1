@@ -29,6 +29,23 @@ iverilog -g2012 -Wall `
 Assert-LastExit "dot_product_engine compile"
 Invoke-CheckedVvp $DotOut
 
+$SchedulerOut = Join-Path $Build "tb_tile_scheduler_bitexact.vvp"
+iverilog -g2012 -Wall `
+    -o $SchedulerOut `
+    (Join-Path $Root "rtl/core/tile_scheduler.sv") `
+    (Join-Path $Root "tb/sv/tb_tile_scheduler_bitexact.sv")
+Assert-LastExit "tile_scheduler bit-exact compile"
+Invoke-CheckedVvp $SchedulerOut
+
+$BufferOut = Join-Path $Build "tb_buffers_bitexact.vvp"
+iverilog -g2012 -Wall `
+    -o $BufferOut `
+    (Join-Path $Root "rtl/mem/row_buffer.sv") `
+    (Join-Path $Root "rtl/mem/tile_buffer.sv") `
+    (Join-Path $Root "tb/sv/tb_buffers_bitexact.sv")
+Assert-LastExit "buffer bit-exact compile"
+Invoke-CheckedVvp $BufferOut
+
 $CoreOut = Join-Path $Build "tb_flash_core_smoke.vvp"
 iverilog -g2012 -Wall `
     -o $CoreOut `

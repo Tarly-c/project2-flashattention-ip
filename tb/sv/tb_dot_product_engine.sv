@@ -61,10 +61,11 @@ module tb_dot_product_engine;
             @(posedge clk);
 
             if (dot !== expected) begin
-                $display("FAIL dot=%0d expected=%0d", dot, expected);
+                $display("FAIL dot=%0d expected=%0d dot_hex=%012h expected_hex=%012h",
+                         dot, expected, dot, expected);
                 $fatal(1);
             end
-            $display("PASS dot=%0d", dot);
+            $display("PASS dot=%0d hex=%012h", dot, dot);
         end
     endtask
 

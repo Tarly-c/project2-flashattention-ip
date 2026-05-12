@@ -18,13 +18,18 @@ Run from the repository root on Windows:
 powershell -ExecutionPolicy Bypass -File .\sim\run_member_b_week1.ps1
 ```
 
-The script compiles and runs:
+The script compiles and runs bit-exact checks for:
 
 - `tb/sv/tb_dot_product_engine.sv`
+- `tb/sv/tb_tile_scheduler_bitexact.sv`
+- `tb/sv/tb_buffers_bitexact.sv`
 - `tb/sv/tb_flash_core_smoke.sv`
 
 ## Expected Result
 
-The dot product test checks two signed examples, including a negative-result case.
-The core smoke test runs `S_LEN=4`, `D_MODEL=4`, `BK=2`, drives the q/kv handshakes,
-and expects one output row per query row.
+The dot product test checks two signed examples with 4-state `!==` comparison.
+The scheduler test checks every emitted row/tile/length/control bit for
+`S_LEN=5`, `BK=2`. The buffer test checks row and K/V tile payloads bit-for-bit,
+including negative and high-bit values. The core smoke test runs `S_LEN=4`,
+`D_MODEL=4`, `BK=2`, drives the q/kv handshakes, and checks every output word
+with bit-exact comparison.
