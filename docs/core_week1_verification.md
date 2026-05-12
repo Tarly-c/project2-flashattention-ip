@@ -24,12 +24,15 @@ The script compiles and runs bit-exact checks for:
 - `tb/sv/tb_tile_scheduler_bitexact.sv`
 - `tb/sv/tb_buffers_bitexact.sv`
 - `tb/sv/tb_flash_core_smoke.sv`
+- `tb/sv/tb_flash_core_matrix16_bitexact.sv`
 
 ## Expected Result
 
 The dot product test checks two signed examples with 4-state `!==` comparison.
 The scheduler test checks every emitted row/tile/length/control bit for
 `S_LEN=5`, `BK=2`. The buffer test checks row and K/V tile payloads bit-for-bit,
-including negative and high-bit values. The core smoke test runs `S_LEN=4`,
-`D_MODEL=4`, `BK=2`, drives the q/kv handshakes, and checks every output word
-with bit-exact comparison.
+including negative and high-bit values. The small core smoke test runs
+`S_LEN=4`, `D_MODEL=4`, `BK=2`, drives the q/kv handshakes, and checks every
+output word with bit-exact comparison. The larger matrix core test runs
+`S_LEN=16`, `D_MODEL=16`, `BK=4`, checks Q row request order, all K/V tile
+requests, and every output word with bit-exact comparison.

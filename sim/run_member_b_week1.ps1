@@ -59,4 +59,17 @@ iverilog -g2012 -Wall `
 Assert-LastExit "flash_core smoke compile"
 Invoke-CheckedVvp $CoreOut
 
+$Matrix16Out = Join-Path $Build "tb_flash_core_matrix16_bitexact.vvp"
+iverilog -g2012 -Wall `
+    -o $Matrix16Out `
+    (Join-Path $Root "rtl/include/flash_attn_pkg.sv") `
+    (Join-Path $Root "rtl/core/tile_scheduler.sv") `
+    (Join-Path $Root "rtl/mem/row_buffer.sv") `
+    (Join-Path $Root "rtl/mem/tile_buffer.sv") `
+    (Join-Path $Root "rtl/core/dot_product_engine.sv") `
+    (Join-Path $Root "rtl/core/flash_core.sv") `
+    (Join-Path $Root "tb/sv/tb_flash_core_matrix16_bitexact.sv")
+Assert-LastExit "flash_core matrix16 bit-exact compile"
+Invoke-CheckedVvp $Matrix16Out
+
 Write-Host "Member B Week 1 RTL checks passed."
