@@ -1,16 +1,18 @@
 `timescale 1ns/1ps
 
 module tb_flash_core_matrix16_bitexact;
-    localparam int S_LEN   = 16;
-    localparam int D_MODEL = 16;
-    localparam int BK      = 4;
-    localparam int DATA_W  = 16;
-    localparam int ACC_W   = 48;
-    localparam int FRAC_W  = 8;
-    localparam int ROW_W   = $clog2(S_LEN);
-    localparam int LEN_W   = $clog2(BK + 1);
+    localparam int S_LEN       = 16;
+    localparam int D_MODEL     = 16;
+    localparam int BK          = 4;
+    localparam int DATA_W      = 16;
+    localparam int ACC_W       = 48;
+    localparam int FRAC_W      = 8;
+    localparam int WEIGHT_FRAC = 8;
+    localparam int WEIGHT_ONE  = 1 << WEIGHT_FRAC;
+    localparam int SCALE_Q8_8  = 256;
+    localparam int ROW_W       = $clog2(S_LEN);
+    localparam int LEN_W       = $clog2(BK + 1);
     localparam int TILES_PER_ROW = S_LEN / BK;
-    localparam int LAST_TILE_START = S_LEN - BK;
 
     logic clk;
     logic rst_n;
@@ -88,62 +90,98 @@ module tb_flash_core_matrix16_bitexact;
 
     always #5 clk = ~clk;
 
-    function automatic logic signed [DATA_W-1:0] q_value(
-        input int row,
-        input int col
-    );
+    function automatic longint signed q_value(input int row, input int col);
         begin
             q_value = (row * 2 + col - 11) <<< 2;
         end
     endfunction
 
-    function automatic logic signed [DATA_W-1:0] k_value(
-        input int key_row,
-        input int col
-    );
+    function automatic longint signed k_value(input int key_row, input int col);
         begin
             k_value = (key_row - col + 7) <<< 3;
         end
     endfunction
 
-    function automatic logic signed [DATA_W-1:0] v_value(
-        input int key_row,
-        input int col
-    );
+    function automatic longint signed v_value(input int key_row, input int col);
         begin
             v_value = (key_row + col - 3) <<< 2;
         end
     endfunction
 
-    function automatic logic signed [DATA_W-1:0] saturate_to_data(
-        input logic signed [ACC_W-1:0] value
-    );
-        logic signed [ACC_W-1:0] max_value;
-        logic signed [ACC_W-1:0] min_value;
+    function automatic longint unsigned exp_approx_weight(input longint signed delta);
+        longint unsigned abs_delta;
+        longint unsigned quotient;
         begin
-            max_value = (1 <<< (DATA_W - 1)) - 1;
-            min_value = -(1 <<< (DATA_W - 1));
+            if (delta >= 0) begin
+                exp_approx_weight = WEIGHT_ONE;
+            end else begin
+                abs_delta = -delta;
+                quotient = (WEIGHT_ONE * WEIGHT_ONE) / (WEIGHT_ONE + abs_delta);
+                exp_approx_weight = (quotient > WEIGHT_ONE) ? WEIGHT_ONE : quotient;
+            end
+        end
+    endfunction
 
-            if (value > max_value) begin
-                saturate_to_data = max_value[DATA_W-1:0];
-            end else if (value < min_value) begin
-                saturate_to_data = min_value[DATA_W-1:0];
+    function automatic logic signed [DATA_W-1:0] saturate_to_data(input longint signed value);
+        begin
+            if (value > 32767) begin
+                saturate_to_data = 16'sh7fff;
+            end else if (value < -32768) begin
+                saturate_to_data = 16'sh8000;
             end else begin
                 saturate_to_data = value[DATA_W-1:0];
             end
         end
     endfunction
 
-    function automatic logic signed [DATA_W-1:0] expected_o0(
-        input int row
-    );
-        logic signed [ACC_W-1:0] acc;
+    function automatic longint signed scaled_score(input int row, input int key);
+        longint signed dot;
         begin
-            acc = '0;
+            dot = 0;
             for (int col = 0; col < D_MODEL; col = col + 1) begin
-                acc += q_value(row, col) * k_value(LAST_TILE_START, col);
+                dot += q_value(row, col) * k_value(key, col);
             end
-            expected_o0 = saturate_to_data(acc >>> FRAC_W);
+            scaled_score = ((dot >>> FRAC_W) * SCALE_Q8_8) >>> FRAC_W;
+        end
+    endfunction
+
+    function automatic logic signed [DATA_W-1:0] expected_o(input int row, input int out_col);
+        longint signed m;
+        longint unsigned l;
+        longint signed acc;
+        longint signed score;
+        longint signed old_scale;
+        longint signed new_weight;
+        begin
+            m = 0;
+            l = 0;
+            acc = 0;
+
+            for (int key = 0; key < S_LEN; key = key + 1) begin
+                if (key <= row) begin
+                    score = scaled_score(row, key);
+
+                    if (l == 0) begin
+                        old_scale = 0;
+                        new_weight = WEIGHT_ONE;
+                        m = score;
+                        l = WEIGHT_ONE;
+                    end else if (score > m) begin
+                        old_scale = exp_approx_weight(m - score);
+                        new_weight = WEIGHT_ONE;
+                        l = ((l * old_scale) >>> WEIGHT_FRAC) + new_weight;
+                        m = score;
+                    end else begin
+                        old_scale = WEIGHT_ONE;
+                        new_weight = exp_approx_weight(score - m);
+                        l = l + new_weight;
+                    end
+
+                    acc = ((acc * old_scale) >>> WEIGHT_FRAC) + (new_weight * v_value(key, out_col));
+                end
+            end
+
+            expected_o = (l == 0) ? '0 : saturate_to_data(acc / longint'(l));
         end
     endfunction
 
@@ -209,22 +247,16 @@ module tb_flash_core_matrix16_bitexact;
                     $fatal(1);
                 end
 
-                if (o_data[0] !== expected_o0(output_rows)) begin
-                    $display("FAIL O[%0d][0] got=%0d hex=%04h expected=%0d hex=%04h",
-                             o_row, o_data[0], o_data[0],
-                             expected_o0(output_rows), expected_o0(output_rows));
-                    $fatal(1);
-                end
-
-                for (d = 1; d < D_MODEL; d = d + 1) begin
-                    if (o_data[d] !== '0) begin
-                        $display("FAIL O[%0d][%0d] got_hex=%04h expected_hex=0000",
-                                 o_row, d, o_data[d]);
+                for (d = 0; d < D_MODEL; d = d + 1) begin
+                    if (o_data[d] !== expected_o(output_rows, d)) begin
+                        $display("FAIL O[%0d][%0d] got=%0d hex=%04h expected=%0d hex=%04h",
+                                 o_row, d, o_data[d], o_data[d],
+                                 expected_o(output_rows, d), expected_o(output_rows, d));
                         $fatal(1);
                     end
                 end
 
-                $display("PASS matrix16 O row=%0d o0=%0d hex=%04h",
+                $display("PASS matrix16 full-core row=%0d bit-exact o0=%0d hex=%04h",
                          o_row, o_data[0], o_data[0]);
                 output_rows <= output_rows + 1;
             end
@@ -238,9 +270,9 @@ module tb_flash_core_matrix16_bitexact;
         clk          = 1'b0;
         rst_n        = 1'b0;
         start        = 1'b0;
-        causal_en    = 1'b0;
+        causal_en    = 1'b1;
         neg_large    = -32'sd32768;
-        scale        = 32'sd32;
+        scale        = SCALE_Q8_8;
         q_req_ready  = 1'b1;
         kv_req_ready = 1'b1;
         o_ready      = 1'b1;
@@ -258,7 +290,7 @@ module tb_flash_core_matrix16_bitexact;
                 wait (done);
             end
             begin
-                repeat (3000) @(posedge clk);
+                repeat (6000) @(posedge clk);
                 $display("FAIL timeout waiting for matrix16 core done");
                 $fatal(1);
             end

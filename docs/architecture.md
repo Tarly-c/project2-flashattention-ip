@@ -1,12 +1,12 @@
 # Architecture Notes
 
-## Member B Core And Memory MVP
+## Member B Core And Memory Path
 
-The Week 1 core implementation is an integration-ready skeleton. It does not
-yet implement online softmax, value accumulation, or final FlashAttention
-normalization. Its purpose is to freeze the core handshakes, prove that the
-core can compile locally, and provide a verified serial dot-product block for
-the next integration step.
+The core implementation is an integration-ready tiled FlashAttention-style
+compute path. It is AXI-agnostic: DMA/top provides Q rows and K/V tiles, while
+the core returns one normalized O row at a time. The current softmax uses a
+deterministic fixed-point exponential approximation so RTL and testbench can be
+checked bit-for-bit.
 
 ### Core Control Flow
 
@@ -17,11 +17,10 @@ It talks to the DMA/top layer through three handshake groups:
 - K/V tile request: `kv_req_valid`, `kv_req_start`, `kv_req_len`, `kv_req_ready`, then `kv_data_valid`.
 - O row output: `o_valid`, `o_row`, `o_data`, `o_ready`.
 
-The MVP state machine loads one Q row, walks all K/V tiles with
-`tile_scheduler`, runs the serial dot-product engine on the first K row of each
-tile as a smoke compute path, then emits one placeholder O row. This keeps the
-baseline interface stable while leaving the online softmax/value path to land
-in Week 2.
+The state machine loads one Q row, walks all K/V tiles with `tile_scheduler`,
+computes a serial dot product for every key row in every tile, applies the
+causal mask, updates the online softmax state, accumulates weighted V values,
+normalizes the accumulator, and emits the complete O row.
 
 ### Tile Scheduler
 
@@ -42,8 +41,63 @@ Inputs and outputs are fixed-point containers, but the module treats them as
 signed integers and leaves scaling interpretation to the caller. The product is
 sign-extended into a 48-bit accumulator by default.
 
+### Causal Mask
+
+`causal_mask_unit` compares `key_index` against `query_index`. When
+`causal_en=1` and `key_index > query_index`, the score is replaced with
+`neg_large` and `score_valid` is cleared. Masked scores do not update the
+softmax denominator or value accumulator.
+
+### Online Softmax
+
+`online_softmax_engine` updates `(m, l)` for one score at a time:
+
+```text
+if first valid score:
+    m = score
+    l = 1.0
+    new_weight = 1.0
+elif score > m:
+    old_scale = exp_approx(m - score)
+    l = l * old_scale + 1.0
+    m = score
+    new_weight = 1.0
+else:
+    old_scale = 1.0
+    new_weight = exp_approx(score - m)
+    l = l + new_weight
+```
+
+Weights are Q0.8 values. The current `exp_approx` is a compact deterministic
+rational approximation:
+
+```text
+exp_approx(delta) = 1.0                         when delta >= 0
+exp_approx(delta) = 1.0 / (1.0 + abs(delta))     when delta < 0
+```
+
+This is intentionally isolated in one module so it can later be replaced by a
+more accurate LUT without changing the core handshake.
+
+### Value Accumulation And Normalization
+
+`value_accumulator` keeps a vector accumulator:
+
+```text
+acc[d] = acc[d] * old_scale + new_weight * V[key][d]
+```
+
+`normalizer` computes:
+
+```text
+O[d] = saturate(acc[d] / l)
+```
+
+The accumulator stores `weight_int * V_q8.8`; dividing by the Q0.8 denominator
+returns a Q8.8 output integer.
+
 ### Buffers
 
-`row_buffer` and `tile_buffer` are synchronous load/hold buffers. They provide
-the minimum storage shell needed for Q row and K/V tile data while the DMA and
-core contracts are still being integrated.
+`row_buffer` and `tile_buffer` are synchronous load/hold buffers. The core also
+keeps explicit working registers for the currently active Q row, K row, and V
+row to keep Icarus-compatible array handling stable.

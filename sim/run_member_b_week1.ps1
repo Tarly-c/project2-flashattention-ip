@@ -54,6 +54,11 @@ iverilog -g2012 -Wall `
     (Join-Path $Root "rtl/mem/row_buffer.sv") `
     (Join-Path $Root "rtl/mem/tile_buffer.sv") `
     (Join-Path $Root "rtl/core/dot_product_engine.sv") `
+    (Join-Path $Root "rtl/core/causal_mask_unit.sv") `
+    (Join-Path $Root "rtl/core/online_softmax_engine.sv") `
+    (Join-Path $Root "rtl/core/value_accumulator.sv") `
+    (Join-Path $Root "rtl/core/quantize_saturate.sv") `
+    (Join-Path $Root "rtl/core/normalizer.sv") `
     (Join-Path $Root "rtl/core/flash_core.sv") `
     (Join-Path $Root "tb/sv/tb_flash_core_smoke.sv")
 Assert-LastExit "flash_core smoke compile"
@@ -67,9 +72,14 @@ iverilog -g2012 -Wall `
     (Join-Path $Root "rtl/mem/row_buffer.sv") `
     (Join-Path $Root "rtl/mem/tile_buffer.sv") `
     (Join-Path $Root "rtl/core/dot_product_engine.sv") `
+    (Join-Path $Root "rtl/core/causal_mask_unit.sv") `
+    (Join-Path $Root "rtl/core/online_softmax_engine.sv") `
+    (Join-Path $Root "rtl/core/value_accumulator.sv") `
+    (Join-Path $Root "rtl/core/quantize_saturate.sv") `
+    (Join-Path $Root "rtl/core/normalizer.sv") `
     (Join-Path $Root "rtl/core/flash_core.sv") `
     (Join-Path $Root "tb/sv/tb_flash_core_matrix16_bitexact.sv")
 Assert-LastExit "flash_core matrix16 bit-exact compile"
 Invoke-CheckedVvp $Matrix16Out
 
-Write-Host "Member B Week 1 RTL checks passed."
+Write-Host "Member B core RTL checks passed."

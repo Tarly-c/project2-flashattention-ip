@@ -24,9 +24,9 @@ module flash_core #(
 | `busy` | output | Asserted while the core state machine is active. |
 | `done` | output | One-cycle completion indication after the final row is accepted. |
 | `error` | output | Reserved for illegal states or downstream failures. |
-| `causal_en` | input | Reserved for the Week 2 causal-mask path. |
-| `neg_large` | input | Reserved mask value for future softmax. |
-| `scale` | input | Reserved attention scale for future softmax. |
+| `causal_en` | input | Enables causal masking: keys with `key_index > query_index` are ignored. |
+| `neg_large` | input | Mask score value, sign-extended into the core score width. |
+| `scale` | input | Q8.8 attention scale applied after dot product. |
 
 ### Q Row Input
 
@@ -60,6 +60,73 @@ module flash_core #(
 | `o_row` | output | Output row index. |
 | `o_data[D_MODEL]` | output | Signed Q8.8 output row payload. |
 | `o_ready` | input | Consumer accepts the row. |
+
+## Member B Internal Compute Modules
+
+### `dot_product_engine`
+
+Serial signed dot product.
+
+```systemverilog
+input  logic start
+input  logic signed [DATA_W-1:0] q_vec [0:D_MODEL-1]
+input  logic signed [DATA_W-1:0] k_vec [0:D_MODEL-1]
+output logic busy
+output logic done
+output logic signed [ACC_W-1:0] dot
+```
+
+### `causal_mask_unit`
+
+Applies causal masking to one score.
+
+```systemverilog
+input  logic causal_en
+input  logic [ROW_W-1:0] query_index
+input  logic [ROW_W-1:0] key_index
+input  logic signed [SCORE_W-1:0] score_in
+input  logic signed [31:0] neg_large
+output logic score_valid
+output logic signed [SCORE_W-1:0] score_out
+```
+
+### `online_softmax_engine`
+
+Updates one online softmax state. Weights are Q0.8 by default.
+
+```systemverilog
+input  logic score_valid
+input  logic signed [SCORE_W-1:0] score
+input  logic signed [SCORE_W-1:0] m_in
+input  logic [L_W-1:0] l_in
+output logic signed [SCORE_W-1:0] m_out
+output logic [L_W-1:0] l_out
+output logic [WEIGHT_W-1:0] old_scale
+output logic [WEIGHT_W-1:0] new_weight
+```
+
+### `value_accumulator`
+
+Updates the weighted V accumulator vector.
+
+```systemverilog
+input  logic signed [ACC_W-1:0] acc_in [0:D_MODEL-1]
+input  logic signed [DATA_W-1:0] v_data [0:D_MODEL-1]
+input  logic [WEIGHT_W-1:0] old_scale
+input  logic [WEIGHT_W-1:0] new_weight
+output wire signed [ACC_W-1:0] acc_out [0:D_MODEL-1]
+```
+
+### `normalizer` And `quantize_saturate`
+
+`normalizer` divides one accumulator lane by the denominator and then uses
+`quantize_saturate` to clamp back to signed Q8.8.
+
+```systemverilog
+input  logic signed [ACC_W-1:0] acc
+input  logic [L_W-1:0] denom
+output logic signed [DATA_W-1:0] out
+```
 
 ## Member B Memory Blocks
 
